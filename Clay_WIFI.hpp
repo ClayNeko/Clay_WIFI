@@ -30,7 +30,8 @@ typedef struct {
 class Clay_WIFI
 {
 public:
-    void init(wifi_mode_t wifi_mode, clay_wifi_config_ap clay_cfg_ap);
+    esp_err_t init();
+    esp_err_t init(wifi_mode_t wifi_mode, clay_wifi_config_ap clay_cfg_ap);
     wifi_scan_result scan();
     esp_err_t connect(clay_wifi_config_sta clay_cfg_sta);
     esp_netif_ip_info_t get_ip_info();
@@ -41,18 +42,38 @@ private:
     wifi_mode_t wifi_mode;
 };
 
-void
+esp_err_t
+Clay_WIFI::init() {
+    wifi_mode = WIFI_MODE_STA;
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
+    assert(sta_netif);
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(wifi_mode));
+
+    ESP_ERROR_CHECK(esp_wifi_start());
+    return ESP_OK;
+}
+
+esp_err_t
 Clay_WIFI::init(wifi_mode_t clay_wifi_mode, clay_wifi_config_ap clay_cfg_ap) {
+    if (wifi_mode == WIFI_MODE_STA) {
+        ESP_LOGE(Clay_WIFI_TAG, "clay_cfg_ap provided, can't use WIFI_MODE_STA");
+        return ESP_ERR_INVALID_ARG;
+    }
+
     wifi_mode = clay_wifi_mode;
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    if (wifi_mode == WIFI_MODE_STA || wifi_mode == WIFI_MODE_APSTA) {
+    esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
+    assert(ap_netif);
+    if (wifi_mode == WIFI_MODE_APSTA) {
         esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
         assert(sta_netif);
-    }
-    if (wifi_mode == WIFI_MODE_AP || wifi_mode == WIFI_MODE_APSTA) {
-        esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
-        assert(ap_netif);
     }
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -60,30 +81,28 @@ Clay_WIFI::init(wifi_mode_t clay_wifi_mode, clay_wifi_config_ap clay_cfg_ap) {
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(wifi_mode));
 
-    if (wifi_mode == WIFI_MODE_AP || wifi_mode == WIFI_MODE_APSTA) {
-        ESP_LOGI(Clay_WIFI_TAG, "wifi_mode includes WIFI_MODE_AP");
-        wifi_config_t wifi_config_ap = {
-            .ap = {
-                .channel = clay_cfg_ap.channel,
-                .authmode = clay_cfg_ap.authmode,
-                .max_connection = clay_cfg_ap.max_connection,
-                .pmf_cfg = {
-                    .required = false,
-                },
-            }
-        };
-        strcpy((char *) wifi_config_ap.ap.ssid, clay_cfg_ap.ssid);
-        strcpy((char *) wifi_config_ap.ap.password, clay_cfg_ap.password);
-        wifi_config_ap.ap.ssid_len = strlen(clay_cfg_ap.ssid);
+    wifi_config_t wifi_config_ap = {
+        .ap = {
+            .channel = clay_cfg_ap.channel,
+            .authmode = clay_cfg_ap.authmode,
+            .max_connection = clay_cfg_ap.max_connection,
+            .pmf_cfg = {
+                .required = false,
+            },
+        }
+    };
+    strcpy((char *) wifi_config_ap.ap.ssid, clay_cfg_ap.ssid);
+    strcpy((char *) wifi_config_ap.ap.password, clay_cfg_ap.password);
+    wifi_config_ap.ap.ssid_len = strlen(clay_cfg_ap.ssid);
 
-        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP,  &wifi_config_ap));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP,  &wifi_config_ap));
 
-        ESP_LOGI(Clay_WIFI_TAG, "wifi_config_ap ->");
-        ESP_LOGI(Clay_WIFI_TAG, "\t ssid - %s", (char*) &wifi_config_ap.ap.ssid);
-        ESP_LOGI(Clay_WIFI_TAG, "\t pass - %s", (char*) &wifi_config_ap.ap.password);
-    }
+    ESP_LOGI(Clay_WIFI_TAG, "wifi_config_ap ->");
+    ESP_LOGI(Clay_WIFI_TAG, "\t ssid - %s", (char*) &wifi_config_ap.ap.ssid);
+    ESP_LOGI(Clay_WIFI_TAG, "\t pass - %s", (char*) &wifi_config_ap.ap.password);
 
     ESP_ERROR_CHECK(esp_wifi_start());
+    return ESP_OK;
 }
 
 wifi_scan_result
@@ -103,6 +122,11 @@ Clay_WIFI::scan() {
 
 esp_err_t
 Clay_WIFI::connect(clay_wifi_config_sta clay_cfg_sta) {
+    if (wifi_mode == WIFI_MODE_AP) {
+        ESP_LOGE(Clay_WIFI_TAG, "ClayWifi is running in WIFI_MODE_AP(only) mode, STA functions is not support");
+        return ESP_ERR_INVALID_ARG;
+    }
+
     wifi_config_t wifi_config_sta = {
             .sta = {
                 .threshold = {
