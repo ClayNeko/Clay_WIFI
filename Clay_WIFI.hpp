@@ -1,5 +1,6 @@
 #pragma once
 #include <string.h>
+#include "esp_mac.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 
@@ -42,6 +43,29 @@ private:
     wifi_mode_t wifi_mode;
 };
 
+static void wifi_event_handler(void* arg, esp_event_base_t event_base,
+                                    int32_t event_id, void* event_data)
+{
+    ESP_LOGI(Clay_WIFI_TAG, "wifi_event_handler got event_id: %d", int(event_id));
+    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
+        wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
+        ESP_LOGI(Clay_WIFI_TAG, "station ["MACSTR"] JOIN, AID=%d",
+                 MAC2STR(event->mac), event->aid);
+    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
+        ESP_LOGI(Clay_WIFI_TAG, "station ["MACSTR"] LEAVE, AID=%d",
+                 MAC2STR(event->mac), event->aid);
+    } else if (event_id == WIFI_EVENT_STA_START) {
+    	esp_err_t status = esp_wifi_connect();
+    	ESP_LOGI(Clay_WIFI_TAG, "esp_wifi_connect %d....", status);
+    } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    	ESP_LOGI(Clay_WIFI_TAG, "esp_wifi_connect error....");
+    } else if (event_id == IP_EVENT_STA_GOT_IP) {
+    	ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+    	ESP_LOGI(Clay_WIFI_TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
+    }
+}
+
 esp_err_t
 Clay_WIFI::init() {
     wifi_mode = WIFI_MODE_STA;
@@ -52,6 +76,14 @@ Clay_WIFI::init() {
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    esp_event_handler_instance_t instance_any_id;
+    esp_event_handler_instance_t instance_got_ip;
+
+    ESP_ERROR_CHECK(
+        esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
+    ESP_ERROR_CHECK(
+        esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, &instance_got_ip));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(wifi_mode));
 
@@ -78,6 +110,14 @@ Clay_WIFI::init(wifi_mode_t clay_wifi_mode, clay_wifi_config_ap clay_cfg_ap) {
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    esp_event_handler_instance_t instance_any_id;
+    esp_event_handler_instance_t instance_got_ip;
+
+    ESP_ERROR_CHECK(
+        esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
+    ESP_ERROR_CHECK(
+        esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, &instance_got_ip));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(wifi_mode));
 
