@@ -7,6 +7,8 @@
 #define DEFAULT_SCAN_LIST_SIZE 10
 
 static const char *Clay_WIFI_TAG = "Clay_WIFI";
+static uint32_t rssi;
+static int rssi_mutex = 0;
 
 typedef struct {
     wifi_ap_record_t    ap_info[DEFAULT_SCAN_LIST_SIZE];
@@ -36,6 +38,7 @@ public:
     wifi_scan_result scan();
     esp_err_t connect(clay_wifi_config_sta clay_cfg_sta);
     esp_netif_ip_info_t get_ip_info();
+    uint32_t get_rssi();
 private:
     void hex_to_mac(uint8_t* dest, char* src);
     void maccpy(uint8_t* dest, char* mac);
@@ -46,23 +49,33 @@ private:
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                     int32_t event_id, void* event_data)
 {
-    ESP_LOGI(Clay_WIFI_TAG, "wifi_event_handler got event_id: %d", int(event_id));
-    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
-        wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
-        ESP_LOGI(Clay_WIFI_TAG, "station ["MACSTR"] JOIN, AID=%d",
-                 MAC2STR(event->mac), event->aid);
-    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
-        wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
-        ESP_LOGI(Clay_WIFI_TAG, "station ["MACSTR"] LEAVE, AID=%d",
-                 MAC2STR(event->mac), event->aid);
-    } else if (event_id == WIFI_EVENT_STA_START) {
-    	esp_err_t status = esp_wifi_connect();
-    	ESP_LOGI(Clay_WIFI_TAG, "esp_wifi_connect %d....", status);
-    } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    ESP_LOGD(Clay_WIFI_TAG, "wifi_event_handler got event_id: %d", int(event_id));
+    /* STA Core Events */
+    if (event_id == WIFI_EVENT_STA_START) {
+    	ESP_LOGI(Clay_WIFI_TAG, "ESP STA started");
+    }
+    else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
     	ESP_LOGI(Clay_WIFI_TAG, "esp_wifi_connect error....");
-    } else if (event_id == IP_EVENT_STA_GOT_IP) {
+    }
+    /* AP Events */
+    else if (event_id == WIFI_EVENT_AP_STACONNECTED) {
+        wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
+        ESP_LOGI(Clay_WIFI_TAG, "station ["MACSTR"] JOIN, AID=%d", MAC2STR(event->mac), event->aid);
+    }
+    else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
+        ESP_LOGI(Clay_WIFI_TAG, "station ["MACSTR"] LEAVE, AID=%d", MAC2STR(event->mac), event->aid);
+    }
+    /* Other Events */
+    else if (event_id == IP_EVENT_STA_GOT_IP) {
     	ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
     	ESP_LOGI(Clay_WIFI_TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
+    }
+    else if (event_id == WIFI_EVENT_STA_BSS_RSSI_LOW) {
+    	wifi_event_bss_rssi_low_t* event = (wifi_event_bss_rssi_low_t*) event_data;
+        rssi = event->rssi;
+        rssi_mutex = 0;
+	    //ESP_LOGI(Clay_WIFI_TAG, "bss rssi is=%d", int(event->rssi));
     }
 }
 
@@ -191,6 +204,14 @@ Clay_WIFI::connect(clay_wifi_config_sta clay_cfg_sta) {
 
     esp_err_t connect_error = esp_wifi_connect();
     return connect_error;
+}
+
+uint32_t
+Clay_WIFI::get_rssi() {
+    rssi_mutex = 1;
+    esp_wifi_set_rssi_threshold(-50);
+    while (rssi_mutex == 1) vTaskDelay(500/portTICK_PERIOD_MS);
+    return rssi;
 }
 
 esp_netif_ip_info_t
